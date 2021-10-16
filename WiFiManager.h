@@ -95,6 +95,11 @@ class WiFiManager
     //sets timeout for which to attempt connecting, useful if you get a lot of failed connects
     void          setConnectTimeout(unsigned long seconds);
 
+    // set a custom hostname, sets sta and ap dhcp client id for esp32, and sta for esp8266
+    bool          setHostname(const char * hostname);
+
+    // get hostname helper
+    String        getWiFiHostname();
 
     void          setDebugOutput(boolean debug);
     //defaults to not showing anything under 8% signal quality if called
@@ -159,6 +164,7 @@ class WiFiManager
     int           status = WL_IDLE_STATUS;
     int           connectWifi(String ssid, String pass);
     uint8_t       waitForConnectResult();
+    bool          setupHostname(bool restart);
 
     void          handleRoot();
     void          handleWifi(boolean scan);
@@ -170,6 +176,7 @@ class WiFiManager
     boolean       captivePortal();
     boolean       configPortalHasTimeout();
 
+bool WiFi_Disconnect();
     // DNS server
     const byte    DNS_PORT = 53;
 
@@ -180,6 +187,8 @@ class WiFiManager
 
     boolean       connect;
     boolean       _debug = true;
+
+    const char *  _hostname               = "";    // hostname for esp8266 for dhcp, and or MDNS
 
     void (*_apcallback)(WiFiManager*) = NULL;
     void (*_savecallback)(void) = NULL;

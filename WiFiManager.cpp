@@ -157,29 +157,99 @@ void WiFiManager::setupConfigPortal() {
 }
 
 boolean WiFiManager::autoConnect() {
-  String ssid = "ESP" + String(ESP.getChipId());
+  String ssid = "HESP" + String(ESP.getChipId());
   return autoConnect(ssid.c_str(), NULL);
 }
 
 boolean WiFiManager::autoConnect(char const *apName, char const *apPassword) {
   DEBUG_WM(F(""));
   DEBUG_WM(F("AutoConnect"));
-
   // read eeprom for ssid and pass
   //String ssid = getSSID();
   //String pass = getPassword();
 
   // attempt to connect; should it fail, fall back to AP
+  WiFi.disconnect();
   WiFi.mode(WIFI_STA);
+    // set hostname before stating
+    if((String)_hostname != ""){
+      setupHostname(true);
+    }
 
   if (connectWifi("", "") == WL_CONNECTED)   {
     DEBUG_WM(F("IP Address:"));
     DEBUG_WM(WiFi.localIP());
+      if((String)_hostname != ""){
+        #ifdef WM_DEBUG_LEVEL
+          DEBUG_WM(DEBUG_DEV,F("hostname: STA: "),getWiFiHostname());
+        #endif
+      }
     //connected
     return true;
   }
 
   return startConfigPortal(apName, apPassword);
+}
+
+
+bool WiFiManager::setupHostname(bool restart){
+DEBUG_WM("setupHostname");
+  if((String)_hostname == "") {
+    #ifdef WM_DEBUG_LEVEL
+    DEBUG_WM(DEBUG_DEV,F("No Hostname to set"));
+    #endif
+    return false;
+  } 
+  else {
+    #ifdef WM_DEBUG_LEVEL
+    DEBUG_WM(DEBUG_DEV,F("setupHostname: "),_hostname);
+    #endif
+  }
+  bool res = true;
+  #ifdef ESP8266
+  #ifdef WM_DEBUG_LEVEL
+    DEBUG_WM(DEBUG_VERBOSE,F("Setting WiFi hostname"));
+    #endif
+    res = WiFi.hostname(_hostname);
+wifi_station_set_hostname(_hostname);
+    // #ifdef ESP8266MDNS_H
+    #ifdef WM_MDNS
+    #ifdef WM_DEBUG_LEVEL
+      DEBUG_WM(DEBUG_VERBOSE,F("Setting MDNS hostname, tcp 80"));
+      #endif
+      if(MDNS.begin(_hostname)){
+        MDNS.addService("http", "tcp", 80);
+      }
+    #endif
+  #elif defined(ESP32)
+    // @note hostname must be set after STA_START
+    delay(200); // do not remove, give time for STA_START
+    res = WiFi.setHostname(_hostname);
+    // #ifdef ESP32MDNS_H
+      #ifdef WM_MDNS
+      #ifdef WM_DEBUG_LEVEL
+      DEBUG_WM(DEBUG_VERBOSE,F("Setting MDNS hostname, tcp 80"));
+      #endif
+      if(MDNS.begin(_hostname)){
+        MDNS.addService("http", "tcp", 80);
+      }
+    #endif
+  #endif
+
+  #ifdef WM_DEBUG_LEVEL
+  if(!res)DEBUG_WM(DEBUG_ERROR,F("[ERROR] hostname: set failed!"));
+  #endif
+
+  if(restart && (WiFi.status() == WL_CONNECTED)){
+    #ifdef WM_DEBUG_LEVEL
+    DEBUG_WM(DEBUG_VERBOSE,F("reconnecting to set new hostname"));
+    #endif
+    // WiFi.reconnect(); // This does not reset dhcp
+    WiFi_Disconnect();
+    delay(200); // do not remove, need a delay for disconnect to change status()
+  }
+
+  return res;
 }
 
 boolean WiFiManager::configPortalHasTimeout(){
@@ -369,6 +439,28 @@ uint8_t WiFiManager::waitForConnectResult() {
     }
     return status;
   }
+}
+
+// sta disconnect without persistent
+bool WiFiManager::WiFi_Disconnect() {
+    #ifdef ESP8266
+      if((WiFi.getMode() & WIFI_STA) != 0) {
+          bool ret;
+          #ifdef WM_DEBUG_LEVEL
+          DEBUG_WM(DEBUG_DEV,F("WiFi station disconnect"));
+          #endif
+          ETS_UART_INTR_DISABLE(); // @todo probably not needed
+          ret = wifi_station_disconnect();
+          ETS_UART_INTR_ENABLE();        
+          return ret;
+      }
+    #elif defined(ESP32)
+    #ifdef WM_DEBUG_LEVEL
+      DEBUG_WM(DEBUG_DEV,F("WiFi station disconnect"));
+      #endif
+      return WiFi.disconnect(); // not persistent atm
+    #endif
+    return false;
 }
 
 void WiFiManager::startWPS() {
@@ -715,6 +807,9 @@ void WiFiManager::handleInfo() {
   page += F("<dt>Station MAC</dt><dd>");
   page += WiFi.macAddress();
   page += F("</dd>");
+  page += F("<dt>Station Hostname</dt><dd>");
+  page += getWiFiHostname();
+  page += F("</dd>");
   page += F("</dl>");
   page += FPSTR(HTTP_END);
 
@@ -803,6 +898,19 @@ void WiFiManager::setRemoveDuplicateAPs(boolean removeDuplicates) {
 }
 
 
+/**
+ * set the hostname (dhcp client id)
+ * @since $dev
+ * @access public
+ * @param  char* hostname 32 character hostname to use for sta+ap in esp32, sta in esp8266
+ * @return bool false if hostname is not valid
+ */
+bool  WiFiManager::setHostname(const char * hostname){
+  //@todo max length 32
+  _hostname = hostname;
+  return true;
+}
+
 
 template <typename Generic>
 void WiFiManager::DEBUG_WM(Generic text) {
@@ -844,4 +952,12 @@ String WiFiManager::toStringIp(IPAddress ip) {
   }
   res += String(((ip >> 8 * 3)) & 0xFF);
   return res;
+}
+
+String WiFiManager::getWiFiHostname(){
+  #ifdef ESP32
+    return (String)WiFi.getHostname();
+  #else
+    return (String)WiFi.hostname();
+  #endif
 }
